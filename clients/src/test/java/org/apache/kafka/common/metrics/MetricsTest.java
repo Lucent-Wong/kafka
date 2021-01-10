@@ -22,6 +22,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -196,12 +197,12 @@ public class MetricsTest {
         assertNull(metrics.childrenSensors().get(grandchild));
     }
 
-    @Test(expected = IllegalArgumentException.class)
+    @Test
     public void testBadSensorHierarchy() {
         Sensor p = metrics.sensor("parent");
         Sensor c1 = metrics.sensor("child1", p);
         Sensor c2 = metrics.sensor("child2", p);
-        metrics.sensor("gc", c1, c2); // should fail
+        assertThrows(IllegalArgumentException.class, () -> metrics.sensor("gc", c1, c2));
     }
 
     @Test
@@ -412,10 +413,11 @@ public class MetricsTest {
         assertEquals(0.0, sampledTotal.measure(config, time.milliseconds()), EPS);
     }
 
-    @Test(expected = IllegalArgumentException.class)
+    @Test
     public void testDuplicateMetricName() {
         metrics.sensor("test").add(metrics.metricName("test", "grp1"), new Avg());
-        metrics.sensor("test2").add(metrics.metricName("test", "grp1"), new CumulativeSum());
+        assertThrows(IllegalArgumentException.class, () ->
+                metrics.sensor("test2").add(metrics.metricName("test", "grp1"), new CumulativeSum()));
     }
 
     @Test
@@ -534,12 +536,12 @@ public class MetricsTest {
     @Test
     public void testPercentilesWithRandomNumbersAndLinearBucketing() {
         long seed = new Random().nextLong();
-        int sizeInBytes = 1000 * 1000;   // 1MB
+        int sizeInBytes = 100 * 1000;   // 100kB
         long maximumValue = 1000 * 24 * 60 * 60 * 1000L; // if values are ms, max is 1000 days
 
         try {
             Random prng = new Random(seed);
-            int numberOfValues = 5000 + prng.nextInt(10_000);  // ranges is [5000, 15000]
+            int numberOfValues = 5000 + prng.nextInt(10_000);  // range is [5000, 15000]
 
             Percentiles percs = new Percentiles(sizeInBytes,
                                                 maximumValue,

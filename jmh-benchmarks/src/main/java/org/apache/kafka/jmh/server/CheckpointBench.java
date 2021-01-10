@@ -18,10 +18,10 @@ package org.apache.kafka.jmh.server;
 
 import java.util.Properties;
 import kafka.cluster.Partition;
-import kafka.cluster.PartitionStateStore;
 import kafka.log.CleanerConfig;
 import kafka.log.LogConfig;
 import kafka.log.LogManager;
+import kafka.server.AlterIsrManager;
 import kafka.server.BrokerTopicStats;
 import kafka.server.KafkaConfig;
 import kafka.server.LogDirFailureChannel;
@@ -38,7 +38,6 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.common.utils.Utils;
-import org.mockito.Mockito;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.Fork;
 import org.openjdk.jmh.annotations.Level;
@@ -89,6 +88,7 @@ public class CheckpointBench {
     private QuotaFactory.QuotaManagers quotaManagers;
     private LogDirFailureChannel failureChannel;
     private LogManager logManager;
+    private AlterIsrManager alterIsrManager;
 
 
     @SuppressWarnings("deprecation")
@@ -97,7 +97,8 @@ public class CheckpointBench {
         this.scheduler = new KafkaScheduler(1, "scheduler-thread", true);
         this.brokerProperties = KafkaConfig.fromProps(TestUtils.createBrokerConfig(
                 0, TestUtils.MockZkConnect(), true, true, 9092, Option.empty(), Option.empty(),
-                Option.empty(), true, false, 0, false, 0, false, 0, Option.empty(), 1, true, 1, (short) 1));
+                Option.empty(), true, false, 0, false, 0, false, 0, Option.empty(), 1, true, 1,
+                (short) 1));
         this.metrics = new Metrics();
         this.time = new MockTime();
         this.failureChannel = new LogDirFailureChannel(brokerProperties.logDirs().size());
@@ -115,12 +116,14 @@ public class CheckpointBench {
                 QuotaFactory.instantiate(this.brokerProperties,
                         this.metrics,
                         this.time, "");
+
         KafkaZkClient zkClient = new KafkaZkClient(null, false, Time.SYSTEM) {
             @Override
             public Properties getEntityConfigs(String rootEntityType, String sanitizedEntityName) {
                 return new Properties();
             }
         };
+        this.alterIsrManager = TestUtils.createAlterIsrManager();
         this.replicaManager = new ReplicaManager(
                 this.brokerProperties,
                 this.metrics,
@@ -133,6 +136,7 @@ public class CheckpointBench {
                 brokerTopicStats,
                 metadataCache,
                 this.failureChannel,
+                alterIsrManager,
                 Option.empty());
         replicaManager.startup();
 
@@ -144,8 +148,6 @@ public class CheckpointBench {
             }
         }
 
-        PartitionStateStore partitionStateStore = Mockito.mock(PartitionStateStore.class);
-        Mockito.when(partitionStateStore.fetchTopicConfig()).thenReturn(new Properties());
         OffsetCheckpoints checkpoints = (logDir, topicPartition) -> Option.apply(0L);
         for (TopicPartition topicPartition : topicPartitions) {
             final Partition partition = this.replicaManager.createPartition(topicPartition);

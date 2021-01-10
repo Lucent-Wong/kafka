@@ -27,7 +27,7 @@ import java.util.{Date, Optional, Properties}
 
 import joptsimple.OptionParser
 import kafka.api._
-import kafka.utils.Whitelist
+import kafka.utils.IncludeList
 import kafka.utils._
 import org.apache.kafka.clients._
 import org.apache.kafka.clients.admin.{Admin, ListTopicsOptions, TopicDescription}
@@ -37,7 +37,7 @@ import org.apache.kafka.common.network.{NetworkReceive, Selectable, Selector}
 import org.apache.kafka.common.protocol.{ApiKeys, Errors}
 import org.apache.kafka.common.record.MemoryRecords
 import org.apache.kafka.common.requests.AbstractRequest.Builder
-import org.apache.kafka.common.requests.{AbstractRequest, FetchResponse, ListOffsetRequest, FetchRequest => JFetchRequest}
+import org.apache.kafka.common.requests.{AbstractRequest, FetchResponse, ListOffsetsRequest, FetchRequest => JFetchRequest}
 import org.apache.kafka.common.serialization.StringDeserializer
 import org.apache.kafka.common.utils.{LogContext, Time}
 import org.apache.kafka.common.{Node, TopicPartition}
@@ -121,7 +121,7 @@ object ReplicaVerificationTool extends Logging {
     CommandLineUtils.checkRequiredArgs(parser, options, brokerListOpt)
 
     val regex = options.valueOf(topicWhiteListOpt)
-    val topicWhiteListFiler = new Whitelist(regex)
+    val topicWhiteListFiler = new IncludeList(regex)
 
     try Pattern.compile(regex)
     catch {
@@ -228,9 +228,9 @@ object ReplicaVerificationTool extends Logging {
                              initialOffsetTime: Long): collection.Map[TopicPartition, Long] = {
     val consumer = createConsumer(consumerConfig)
     try {
-      if (ListOffsetRequest.LATEST_TIMESTAMP == initialOffsetTime)
+      if (ListOffsetsRequest.LATEST_TIMESTAMP == initialOffsetTime)
         consumer.endOffsets(topicPartitions.asJava).asScala.map { case (k, v) => k -> v.longValue }
-      else if (ListOffsetRequest.EARLIEST_TIMESTAMP == initialOffsetTime)
+      else if (ListOffsetsRequest.EARLIEST_TIMESTAMP == initialOffsetTime)
         consumer.beginningOffsets(topicPartitions.asJava).asScala.map { case (k, v) => k -> v.longValue }
       else {
         val timestampsToSearch = topicPartitions.map(tp => tp -> (initialOffsetTime: java.lang.Long)).toMap
@@ -334,14 +334,14 @@ private class ReplicaBuffer(expectedReplicasPerTopicPartition: collection.Map[To
                       MessageInfo(replicaId, batch.lastOffset, batch.nextOffset, batch.checksum))
                   case Some(messageInfoFromFirstReplica) =>
                     if (messageInfoFromFirstReplica.offset != batch.lastOffset) {
-                      println(ReplicaVerificationTool.getCurrentTimeString + ": partition " + topicPartition
+                      println(ReplicaVerificationTool.getCurrentTimeString() + ": partition " + topicPartition
                         + ": replica " + messageInfoFromFirstReplica.replicaId + "'s offset "
                         + messageInfoFromFirstReplica.offset + " doesn't match replica "
                         + replicaId + "'s offset " + batch.lastOffset)
                       Exit.exit(1)
                     }
                     if (messageInfoFromFirstReplica.checksum != batch.checksum)
-                      println(ReplicaVerificationTool.getCurrentTimeString + ": partition "
+                      println(ReplicaVerificationTool.getCurrentTimeString() + ": partition "
                         + topicPartition + " has unmatched checksum at offset " + batch.lastOffset + "; replica "
                         + messageInfoFromFirstReplica.replicaId + "'s checksum " + messageInfoFromFirstReplica.checksum
                         + "; replica " + replicaId + "'s checksum " + batch.checksum)
@@ -479,6 +479,8 @@ private class ReplicaFetcherBlockingSend(sourceNode: Node,
       Selectable.USE_DEFAULT_BUFFER_SIZE,
       consumerConfig.getInt(ConsumerConfig.RECEIVE_BUFFER_CONFIG),
       consumerConfig.getInt(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG),
+      consumerConfig.getLong(ConsumerConfig.SOCKET_CONNECTION_SETUP_TIMEOUT_MS_CONFIG),
+      consumerConfig.getLong(ConsumerConfig.SOCKET_CONNECTION_SETUP_TIMEOUT_MAX_MS_CONFIG),
       ClientDnsLookup.USE_ALL_DNS_IPS,
       time,
       false,

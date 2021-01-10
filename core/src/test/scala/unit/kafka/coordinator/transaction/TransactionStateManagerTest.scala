@@ -20,7 +20,6 @@ import java.lang.management.ManagementFactory
 import java.nio.ByteBuffer
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.locks.ReentrantLock
-
 import javax.management.ObjectName
 import kafka.log.{AppendOrigin, Log}
 import kafka.server.{FetchDataInfo, FetchLogEnd, LogOffsetMetadata, ReplicaManager}
@@ -35,9 +34,8 @@ import org.apache.kafka.common.requests.ProduceResponse.PartitionResponse
 import org.apache.kafka.common.requests.TransactionResult
 import org.apache.kafka.common.utils.MockTime
 import org.easymock.{Capture, EasyMock, IAnswer}
-import org.junit.Assert.{assertEquals, assertFalse, assertTrue}
+import org.junit.Assert.{assertEquals, assertFalse, assertThrows, assertTrue, fail}
 import org.junit.{After, Before, Test}
-import org.scalatest.Assertions.fail
 
 import scala.jdk.CollectionConverters._
 import scala.collection.{Map, mutable}
@@ -278,12 +276,12 @@ class TransactionStateManagerTest {
     )
 
     val cachedPidMetadata1 = transactionManager.getTransactionState(transactionalId1).fold(
-      err => fail(transactionalId1 + "'s transaction state access returns error " + err),
-      entry => entry.getOrElse(fail(transactionalId1 + "'s transaction state was not loaded into the cache"))
+      err => throw new AssertionError(transactionalId1 + "'s transaction state access returns error " + err),
+      entry => entry.getOrElse(throw new AssertionError(transactionalId1 + "'s transaction state was not loaded into the cache"))
     )
     val cachedPidMetadata2 = transactionManager.getTransactionState(transactionalId2).fold(
-      err => fail(transactionalId2 + "'s transaction state access returns error " + err),
-      entry => entry.getOrElse(fail(transactionalId2 + "'s transaction state was not loaded into the cache"))
+      err => throw new AssertionError(transactionalId2 + "'s transaction state access returns error " + err),
+      entry => entry.getOrElse(throw new AssertionError(transactionalId2 + "'s transaction state was not loaded into the cache"))
     )
 
     // they should be equal to the latest status of the transaction
@@ -366,7 +364,7 @@ class TransactionStateManagerTest {
     expectedError = Errors.NOT_COORDINATOR
     var failedMetadata = txnMetadata1.prepareAddPartitions(Set[TopicPartition](new TopicPartition("topic2", 0)), time.milliseconds())
 
-    prepareForTxnMessageAppend(Errors.NOT_LEADER_FOR_PARTITION)
+    prepareForTxnMessageAppend(Errors.NOT_LEADER_OR_FOLLOWER)
     transactionManager.appendTransactionToLog(transactionalId1, coordinatorEpoch = 10, failedMetadata, assertCallback)
     assertEquals(Right(Some(CoordinatorEpochAndTxnMetadata(coordinatorEpoch, txnMetadata1))), transactionManager.getTransactionState(transactionalId1))
     assertTrue(txnMetadata1.pendingState.isEmpty)
@@ -456,7 +454,7 @@ class TransactionStateManagerTest {
     transactionManager.appendTransactionToLog(transactionalId1, coordinatorEpoch = 10, newMetadata, assertCallback)
   }
 
-  @Test(expected = classOf[IllegalStateException])
+  @Test
   def testAppendTransactionToLogWhilePendingStateChanged(): Unit = {
     // first insert the initial transaction metadata
     transactionManager.addLoadedTransactionsToCache(partitionId, coordinatorEpoch, new Pool[String, TransactionMetadata]())
@@ -472,7 +470,8 @@ class TransactionStateManagerTest {
     txnMetadata1.pendingState = None
 
     // append the new metadata into log
-    transactionManager.appendTransactionToLog(transactionalId1, coordinatorEpoch = 10, newMetadata, assertCallback)
+    assertThrows(classOf[IllegalStateException], () => transactionManager.appendTransactionToLog(transactionalId1,
+      coordinatorEpoch = 10, newMetadata, assertCallback))
   }
 
   @Test

@@ -42,11 +42,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
-import java.util.Properties;
 
-import static org.apache.kafka.common.utils.Utils.mkEntry;
-import static org.apache.kafka.common.utils.Utils.mkMap;
-import static org.apache.kafka.common.utils.Utils.mkProperties;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.hasItems;
@@ -68,10 +64,6 @@ public class TestTopicsTest {
     private final Serde<String> stringSerde = new Serdes.StringSerde();
     private final Serde<Long> longSerde = new Serdes.LongSerde();
 
-    private final Properties config = mkProperties(mkMap(
-            mkEntry(StreamsConfig.APPLICATION_ID_CONFIG, "TestTopicsTest"),
-            mkEntry(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "dummy:1234")
-    ));
     private final Instant testBaseTime = Instant.parse("2019-06-01T10:00:00Z");
 
     @Before
@@ -82,7 +74,7 @@ public class TestTopicsTest {
         final KStream<Long, String> source = builder.stream(INPUT_TOPIC_MAP, Consumed.with(longSerde, stringSerde));
         final KStream<String, Long> mapped = source.map((key, value) -> new KeyValue<>(value, key));
         mapped.to(OUTPUT_TOPIC_MAP, Produced.with(stringSerde, longSerde));
-        testDriver = new TopologyTestDriver(builder.build(), config);
+        testDriver = new TopologyTestDriver(builder.build());
     }
 
     @After
@@ -334,7 +326,7 @@ public class TestTopicsTest {
     public void testNonExistingOutputTopic() {
         final TestOutputTopic<Long, String> outputTopic =
             testDriver.createOutputTopic("no-exist", longSerde.deserializer(), stringSerde.deserializer());
-        assertThrows("Unknown topic", IllegalArgumentException.class, outputTopic::readRecord);
+        assertThrows("Uninitialized topic", NoSuchElementException.class, outputTopic::readRecord);
     }
 
     @Test
@@ -364,34 +356,35 @@ public class TestTopicsTest {
         assertThrows("Unknown topic", IllegalArgumentException.class, () -> inputTopic.pipeInput(1L, "Hello"));
     }
 
-    @Test(expected = NullPointerException.class)
+    @Test
     public void shouldNotAllowToCreateTopicWithNullTopicName() {
-        testDriver.createInputTopic(null, stringSerde.serializer(), stringSerde.serializer());
+        assertThrows(NullPointerException.class, () -> testDriver.createInputTopic(null, stringSerde.serializer(), stringSerde.serializer()));
     }
 
-    @Test(expected = NullPointerException.class)
+    @Test
     public void shouldNotAllowToCreateWithNullDriver() {
-        new TestInputTopic<>(null, INPUT_TOPIC, stringSerde.serializer(), stringSerde.serializer(), Instant.now(), Duration.ZERO);
+        assertThrows(NullPointerException.class,
+            () -> new TestInputTopic<>(null, INPUT_TOPIC, stringSerde.serializer(), stringSerde.serializer(), Instant.now(), Duration.ZERO));
     }
 
 
-    @Test(expected = StreamsException.class)
+    @Test
     public void testWrongSerde() {
         final TestInputTopic<String, String> inputTopic =
             testDriver.createInputTopic(INPUT_TOPIC_MAP, stringSerde.serializer(), stringSerde.serializer());
-        inputTopic.pipeInput("1L", "Hello");
+        assertThrows(StreamsException.class, () -> inputTopic.pipeInput("1L", "Hello"));
     }
 
-    @Test(expected = IllegalArgumentException.class)
+    @Test
     public void testDuration() {
-        testDriver.createInputTopic(INPUT_TOPIC_MAP, stringSerde.serializer(), stringSerde.serializer(), testBaseTime, Duration.ofDays(-1));
+        assertThrows(IllegalArgumentException.class,
+            () -> testDriver.createInputTopic(INPUT_TOPIC_MAP, stringSerde.serializer(), stringSerde.serializer(), testBaseTime, Duration.ofDays(-1)));
     }
 
-    @Test(expected = IllegalArgumentException.class)
+    @Test
     public void testNegativeAdvance() {
-        final TestInputTopic<String, String> inputTopic =
-            testDriver.createInputTopic(INPUT_TOPIC_MAP, stringSerde.serializer(), stringSerde.serializer());
-        inputTopic.advanceTime(Duration.ofDays(-1));
+        final TestInputTopic<String, String> inputTopic = testDriver.createInputTopic(INPUT_TOPIC_MAP, stringSerde.serializer(), stringSerde.serializer());
+        assertThrows(IllegalArgumentException.class, () -> inputTopic.advanceTime(Duration.ofDays(-1)));
     }
 
     @Test
@@ -404,24 +397,24 @@ public class TestTopicsTest {
                 containsString("StringSerializer")));
     }
 
-    @Test(expected = NullPointerException.class)
+    @Test
     public void shouldNotAllowToCreateOutputTopicWithNullTopicName() {
-        testDriver.createOutputTopic(null, stringSerde.deserializer(), stringSerde.deserializer());
+        assertThrows(NullPointerException.class, () -> testDriver.createOutputTopic(null, stringSerde.deserializer(), stringSerde.deserializer()));
     }
 
-    @Test(expected = NullPointerException.class)
+    @Test
     public void shouldNotAllowToCreateOutputWithNullDriver() {
-        new TestOutputTopic<>(null, OUTPUT_TOPIC, stringSerde.deserializer(), stringSerde.deserializer());
+        assertThrows(NullPointerException.class, () -> new TestOutputTopic<>(null, OUTPUT_TOPIC, stringSerde.deserializer(), stringSerde.deserializer()));
     }
 
-    @Test(expected = SerializationException.class)
+    @Test
     public void testOutputWrongSerde() {
         final TestInputTopic<Long, String> inputTopic =
             testDriver.createInputTopic(INPUT_TOPIC_MAP, longSerde.serializer(), stringSerde.serializer());
         final TestOutputTopic<Long, String> outputTopic =
             testDriver.createOutputTopic(OUTPUT_TOPIC_MAP, longSerde.deserializer(), stringSerde.deserializer());
         inputTopic.pipeInput(1L, "Hello");
-        assertThat(outputTopic.readKeyValue(), equalTo(new KeyValue<>(1L, "Hello")));
+        assertThrows(SerializationException.class, outputTopic::readKeyValue);
     }
 
     @Test

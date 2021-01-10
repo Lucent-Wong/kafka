@@ -38,7 +38,6 @@ import org.apache.kafka.common.security.auth.SecurityProtocol
 import org.apache.kafka.common.serialization.StringDeserializer
 import org.apache.kafka.clients.admin.{Admin, AdminClientConfig, AlterConfigsResult, Config, ConfigEntry}
 import org.junit.Assert._
-import org.scalatest.Assertions.intercept
 
 import scala.annotation.nowarn
 
@@ -57,7 +56,7 @@ class UncleanLeaderElectionTest extends ZooKeeperTestHarness {
   var servers: Seq[KafkaServer] = Seq.empty[KafkaServer]
 
   val random = new Random()
-  val topic = "topic" + random.nextLong
+  val topic = "topic" + random.nextLong()
   val partitionId = 0
 
   val kafkaApisLogger = Logger.getLogger(classOf[kafka.server.KafkaApis])
@@ -112,7 +111,7 @@ class UncleanLeaderElectionTest extends ZooKeeperTestHarness {
     // create topic with 1 partition, 2 replicas, one on each broker
     TestUtils.createTopic(zkClient, topic, Map(partitionId -> Seq(brokerId1, brokerId2)), servers)
 
-    verifyUncleanLeaderElectionEnabled
+    verifyUncleanLeaderElectionEnabled()
   }
 
   @Test
@@ -123,7 +122,7 @@ class UncleanLeaderElectionTest extends ZooKeeperTestHarness {
     // create topic with 1 partition, 2 replicas, one on each broker
     TestUtils.createTopic(zkClient, topic, Map(partitionId -> Seq(brokerId1, brokerId2)), servers)
 
-    verifyUncleanLeaderElectionDisabled
+    verifyUncleanLeaderElectionDisabled()
   }
 
   @Test
@@ -138,7 +137,7 @@ class UncleanLeaderElectionTest extends ZooKeeperTestHarness {
     topicProps.put("unclean.leader.election.enable", "true")
     TestUtils.createTopic(zkClient, topic, Map(partitionId -> Seq(brokerId1, brokerId2)), servers, topicProps)
 
-    verifyUncleanLeaderElectionEnabled
+    verifyUncleanLeaderElectionEnabled()
   }
 
   @Test
@@ -153,7 +152,7 @@ class UncleanLeaderElectionTest extends ZooKeeperTestHarness {
     topicProps.put("unclean.leader.election.enable", "false")
     TestUtils.createTopic(zkClient, topic, Map(partitionId -> Seq(brokerId1, brokerId2)), servers, topicProps)
 
-    verifyUncleanLeaderElectionDisabled
+    verifyUncleanLeaderElectionDisabled()
   }
 
   @Test
@@ -164,9 +163,8 @@ class UncleanLeaderElectionTest extends ZooKeeperTestHarness {
     val topicProps = new Properties()
     topicProps.put("unclean.leader.election.enable", "invalid")
 
-    intercept[ConfigException] {
-      TestUtils.createTopic(zkClient, topic, Map(partitionId -> Seq(brokerId1)), servers, topicProps)
-    }
+    assertThrows(classOf[ConfigException],
+      () => TestUtils.createTopic(zkClient, topic, Map(partitionId -> Seq(brokerId1)), servers, topicProps))
   }
 
   def verifyUncleanLeaderElectionEnabled(): Unit = {
@@ -277,7 +275,7 @@ class UncleanLeaderElectionTest extends ZooKeeperTestHarness {
     val brokerList = TestUtils.bootstrapServers(servers, ListenerName.forSecurityProtocol(SecurityProtocol.PLAINTEXT))
     // Don't rely on coordinator as it may be down when this method is called
     val consumer = TestUtils.createConsumer(brokerList,
-      groupId = "group" + random.nextLong,
+      groupId = "group" + random.nextLong(),
       enableAutoCommit = false,
       valueDeserializer = new StringDeserializer)
     try {

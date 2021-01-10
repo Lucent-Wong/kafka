@@ -108,17 +108,18 @@ public class ConsumerConfig extends AbstractConfig {
      */
     public static final String PARTITION_ASSIGNMENT_STRATEGY_CONFIG = "partition.assignment.strategy";
     private static final String PARTITION_ASSIGNMENT_STRATEGY_DOC = "A list of class names or class types, " +
-            "ordered by preference, of supported partition assignment " +
-            "strategies that the client will use to distribute partition " +
-            "ownership amongst consumer instances when group management is " +
-            "used.<p>In addition to the default class specified below, " +
-            "you can use the " +
-            "<code>org.apache.kafka.clients.consumer.RoundRobinAssignor</code>" +
-            "class for round robin assignments of partitions to consumers. " +
-            "</p><p>Implementing the " +
-            "<code>org.apache.kafka.clients.consumer.ConsumerPartitionAssignor" +
-            "</code> interface allows you to plug in a custom assignment" +
-            "strategy.";
+        "ordered by preference, of supported partition assignment strategies that the client will use to distribute " +
+        "partition ownership amongst consumer instances when group management is used. Available options are:" +
+        "<ul>" +
+        "<li><code>org.apache.kafka.clients.consumer.RangeAssignor</code>: The default assignor, which works on a per-topic basis.</li>" +
+        "<li><code>org.apache.kafka.clients.consumer.RoundRobinAssignor</code>: Assigns partitions to consumers in a round-robin fashion.</li>" +
+        "<li><code>org.apache.kafka.clients.consumer.StickyAssignor</code>: Guarantees an assignment that is " +
+        "maximally balanced while preserving as many existing partition assignments as possible.</li>" +
+        "<li><code>org.apache.kafka.clients.consumer.CooperativeStickyAssignor</code>: Follows the same StickyAssignor " +
+        "logic, but allows for cooperative rebalancing.</li>" +
+        "</ul>" +
+        "<p>Implementing the <code>org.apache.kafka.clients.consumer.ConsumerPartitionAssignor</code> " +
+        "interface allows you to plug in a custom assignment strategy.";
 
     /**
      * <code>auto.offset.reset</code>
@@ -228,6 +229,12 @@ public class ConsumerConfig extends AbstractConfig {
     /** <code>value.deserializer</code> */
     public static final String VALUE_DESERIALIZER_CLASS_CONFIG = "value.deserializer";
     public static final String VALUE_DESERIALIZER_CLASS_DOC = "Deserializer class for value that implements the <code>org.apache.kafka.common.serialization.Deserializer</code> interface.";
+
+    /** <code>socket.connection.setup.timeout.ms</code> */
+    public static final String SOCKET_CONNECTION_SETUP_TIMEOUT_MS_CONFIG = CommonClientConfigs.SOCKET_CONNECTION_SETUP_TIMEOUT_MS_CONFIG;
+
+    /** <code>socket.connection.setup.timeout.max.ms</code> */
+    public static final String SOCKET_CONNECTION_SETUP_TIMEOUT_MAX_MS_CONFIG = CommonClientConfigs.SOCKET_CONNECTION_SETUP_TIMEOUT_MAX_MS_CONFIG;
 
     /** <code>connections.max.idle.ms</code> */
     public static final String CONNECTIONS_MAX_IDLE_MS_CONFIG = CommonClientConfigs.CONNECTIONS_MAX_IDLE_MS_CONFIG;
@@ -449,7 +456,7 @@ public class ConsumerConfig extends AbstractConfig {
                                 .define(METRICS_RECORDING_LEVEL_CONFIG,
                                         Type.STRING,
                                         Sensor.RecordingLevel.INFO.toString(),
-                                        in(Sensor.RecordingLevel.INFO.toString(), Sensor.RecordingLevel.DEBUG.toString()),
+                                        in(Sensor.RecordingLevel.INFO.toString(), Sensor.RecordingLevel.DEBUG.toString(), Sensor.RecordingLevel.TRACE.toString()),
                                         Importance.LOW,
                                         CommonClientConfigs.METRICS_RECORDING_LEVEL_DOC)
                                 .define(METRIC_REPORTER_CLASSES_CONFIG,
@@ -478,6 +485,16 @@ public class ConsumerConfig extends AbstractConfig {
                                         atLeast(0),
                                         Importance.MEDIUM,
                                         CommonClientConfigs.DEFAULT_API_TIMEOUT_MS_DOC)
+                                .define(SOCKET_CONNECTION_SETUP_TIMEOUT_MS_CONFIG,
+                                        Type.LONG,
+                                        CommonClientConfigs.DEFAULT_SOCKET_CONNECTION_SETUP_TIMEOUT_MS,
+                                        Importance.MEDIUM,
+                                        CommonClientConfigs.SOCKET_CONNECTION_SETUP_TIMEOUT_MS_DOC)
+                                .define(SOCKET_CONNECTION_SETUP_TIMEOUT_MAX_MS_CONFIG,
+                                        Type.LONG,
+                                        CommonClientConfigs.DEFAULT_SOCKET_CONNECTION_SETUP_TIMEOUT_MAX_MS,
+                                        Importance.MEDIUM,
+                                        CommonClientConfigs.SOCKET_CONNECTION_SETUP_TIMEOUT_MAX_MS_DOC)
                                 /* default is set to be a bit lower than the server default (10 min), to avoid both client and server closing connection at same time */
                                 .define(CONNECTIONS_MAX_IDLE_MS_CONFIG,
                                         Type.LONG,
@@ -563,9 +580,19 @@ public class ConsumerConfig extends AbstractConfig {
         }
     }
 
+    /**
+     * @deprecated Since 2.7.0. This will be removed in a future major release.
+     */
+    @Deprecated
     public static Map<String, Object> addDeserializerToConfig(Map<String, Object> configs,
                                                               Deserializer<?> keyDeserializer,
                                                               Deserializer<?> valueDeserializer) {
+        return appendDeserializerToConfig(configs, keyDeserializer, valueDeserializer);
+    }
+
+    static Map<String, Object> appendDeserializerToConfig(Map<String, Object> configs,
+            Deserializer<?> keyDeserializer,
+            Deserializer<?> valueDeserializer) {
         Map<String, Object> newConfigs = new HashMap<>(configs);
         if (keyDeserializer != null)
             newConfigs.put(KEY_DESERIALIZER_CLASS_CONFIG, keyDeserializer.getClass());
@@ -574,6 +601,10 @@ public class ConsumerConfig extends AbstractConfig {
         return newConfigs;
     }
 
+    /**
+     * @deprecated Since 2.7.0. This will be removed in a future major release.
+     */
+    @Deprecated
     public static Properties addDeserializerToConfig(Properties properties,
                                                      Deserializer<?> keyDeserializer,
                                                      Deserializer<?> valueDeserializer) {
@@ -620,7 +651,7 @@ public class ConsumerConfig extends AbstractConfig {
     }
 
     public static void main(String[] args) {
-        System.out.println(CONFIG.toHtml());
+        System.out.println(CONFIG.toHtml(4, config -> "consumerconfigs_" + config));
     }
 
 }

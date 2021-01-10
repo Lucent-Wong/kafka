@@ -178,18 +178,18 @@ class ActiveTaskCreator {
     }
 
     StreamTask createActiveTaskFromStandby(final StandbyTask standbyTask,
-                                           final Set<TopicPartition> partitions,
+                                           final Set<TopicPartition> inputPartitions,
                                            final Consumer<byte[], byte[]> consumer) {
         final InternalProcessorContext context = standbyTask.processorContext();
         final ProcessorStateManager stateManager = standbyTask.stateMgr;
         final LogContext logContext = getLogContext(standbyTask.id);
 
-        standbyTask.closeAndRecycleState();
+        standbyTask.closeCleanAndRecycleState();
         stateManager.transitionTaskType(TaskType.ACTIVE, logContext);
 
         return createActiveTask(
             standbyTask.id,
-            partitions,
+            inputPartitions,
             consumer,
             logContext,
             builder.buildSubtopology(standbyTask.id.topicGroupId),
@@ -199,7 +199,7 @@ class ActiveTaskCreator {
     }
 
     private StreamTask createActiveTask(final TaskId taskId,
-                                        final Set<TopicPartition> partitions,
+                                        final Set<TopicPartition> inputPartitions,
                                         final Consumer<byte[], byte[]> consumer,
                                         final LogContext logContext,
                                         final ProcessorTopology topology,
@@ -230,7 +230,7 @@ class ActiveTaskCreator {
 
         final StreamTask task = new StreamTask(
             taskId,
-            partitions,
+            inputPartitions,
             topology,
             consumer,
             config,
@@ -243,7 +243,7 @@ class ActiveTaskCreator {
             context
         );
 
-        log.trace("Created task {} with assigned partitions {}", taskId, partitions);
+        log.trace("Created task {} with assigned partitions {}", taskId, inputPartitions);
         createTaskSensor.record();
         return task;
     }

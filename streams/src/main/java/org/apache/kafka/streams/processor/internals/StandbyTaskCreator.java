@@ -108,16 +108,16 @@ class StandbyTaskCreator {
     }
 
     StandbyTask createStandbyTaskFromActive(final StreamTask streamTask,
-                                            final Set<TopicPartition> partitions) {
+                                            final Set<TopicPartition> inputPartitions) {
         final InternalProcessorContext context = streamTask.processorContext();
         final ProcessorStateManager stateManager = streamTask.stateMgr;
 
-        streamTask.closeAndRecycleState();
+        streamTask.closeCleanAndRecycleState();
         stateManager.transitionTaskType(TaskType.STANDBY, getLogContext(streamTask.id()));
 
         return createStandbyTask(
             streamTask.id(),
-            partitions,
+            inputPartitions,
             builder.buildSubtopology(streamTask.id.topicGroupId),
             stateManager,
             context
@@ -125,13 +125,13 @@ class StandbyTaskCreator {
     }
 
     StandbyTask createStandbyTask(final TaskId taskId,
-                                  final Set<TopicPartition> partitions,
+                                  final Set<TopicPartition> inputPartitions,
                                   final ProcessorTopology topology,
                                   final ProcessorStateManager stateManager,
                                   final InternalProcessorContext context) {
         final StandbyTask task = new StandbyTask(
             taskId,
-            partitions,
+            inputPartitions,
             topology,
             config,
             streamsMetrics,
@@ -141,7 +141,7 @@ class StandbyTaskCreator {
             context
         );
 
-        log.trace("Created task {} with assigned partitions {}", taskId, partitions);
+        log.trace("Created task {} with assigned partitions {}", taskId, inputPartitions);
         createTaskSensor.record();
         return task;
     }

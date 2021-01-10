@@ -44,6 +44,7 @@ import org.apache.kafka.common.requests.JoinGroupRequest;
 import org.apache.kafka.common.requests.JoinGroupResponse;
 import org.apache.kafka.common.requests.LeaveGroupRequest;
 import org.apache.kafka.common.requests.LeaveGroupResponse;
+import org.apache.kafka.common.requests.RequestTestUtils;
 import org.apache.kafka.common.requests.SyncGroupRequest;
 import org.apache.kafka.common.requests.SyncGroupResponse;
 import org.apache.kafka.common.utils.LogContext;
@@ -128,7 +129,7 @@ public class AbstractCoordinatorTest {
                                                         HEARTBEAT_INTERVAL_MS);
         metrics = new Metrics(mockTime);
 
-        mockClient.updateMetadata(TestUtils.metadataUpdateWith(1, emptyMap()));
+        mockClient.updateMetadata(RequestTestUtils.metadataUpdateWith(1, emptyMap()));
         this.node = metadata.fetch().nodes().get(0);
         this.coordinatorNode = new Node(Integer.MAX_VALUE - node.id(), node.host(), node.port());
 
@@ -248,9 +249,9 @@ public class AbstractCoordinatorTest {
         mockClient.prepareResponse(groupCoordinatorResponse(node, Errors.NONE));
         mockClient.prepareResponse(groupCoordinatorResponse(node, Errors.NONE));
 
-        // blackout the coordinator for 10 milliseconds to simulate a disconnect.
+        // cut out the coordinator for 10 milliseconds to simulate a disconnect.
         // after backing off, we should be able to connect.
-        mockClient.blackout(coordinatorNode, 10L);
+        mockClient.backoff(coordinatorNode, 10L);
 
         long initialTime = mockTime.milliseconds();
         coordinator.ensureCoordinatorReady(mockTime.timer(Long.MAX_VALUE));
@@ -446,9 +447,29 @@ public class AbstractCoordinatorTest {
             coordinator.resetGenerationOnLeaveGroup();
 
             SyncGroupRequest syncGroupRequest = (SyncGroupRequest) body;
-            return syncGroupRequest.data.protocolType().equals(PROTOCOL_TYPE)
-                       && syncGroupRequest.data.protocolName().equals(PROTOCOL_NAME);
+            return syncGroupRequest.data().protocolType().equals(PROTOCOL_TYPE)
+                       && syncGroupRequest.data().protocolName().equals(PROTOCOL_NAME);
         }, syncGroupResponse(Errors.NONE, PROTOCOL_TYPE, wrongProtocolName));
+
+        // let the retry to complete successfully to break out of the while loop
+        mockClient.prepareResponse(body -> {
+            if (!(body instanceof JoinGroupRequest)) {
+                return false;
+            }
+            JoinGroupRequest joinGroupRequest = (JoinGroupRequest) body;
+            return joinGroupRequest.data().protocolType().equals(PROTOCOL_TYPE);
+        }, joinGroupFollowerResponse(1, memberId,
+                "memberid", Errors.NONE, PROTOCOL_TYPE));
+
+        mockClient.prepareResponse(body -> {
+            if (!(body instanceof SyncGroupRequest)) {
+                return false;
+            }
+
+            SyncGroupRequest syncGroupRequest = (SyncGroupRequest) body;
+            return syncGroupRequest.data().protocolType().equals(PROTOCOL_TYPE)
+                    && syncGroupRequest.data().protocolName().equals(PROTOCOL_NAME);
+        }, syncGroupResponse(Errors.NONE, PROTOCOL_TYPE, PROTOCOL_NAME));
 
         // No exception shall be thrown as the generation is reset.
         coordinator.joinGroupIfNeeded(mockTime.timer(100L));
@@ -476,8 +497,8 @@ public class AbstractCoordinatorTest {
                 return false;
             }
             SyncGroupRequest syncGroupRequest = (SyncGroupRequest) body;
-            return syncGroupRequest.data.protocolType().equals(PROTOCOL_TYPE)
-                && syncGroupRequest.data.protocolName().equals(PROTOCOL_NAME);
+            return syncGroupRequest.data().protocolType().equals(PROTOCOL_TYPE)
+                && syncGroupRequest.data().protocolName().equals(PROTOCOL_NAME);
         }, syncGroupResponse(Errors.NONE, syncGroupResponseProtocolType, syncGroupResponseProtocolName));
 
         return coordinator.joinGroupIfNeeded(mockTime.timer(5000L));
@@ -531,7 +552,7 @@ public class AbstractCoordinatorTest {
 
         final AbstractCoordinator.Generation currGen = coordinator.generation();
 
-        coordinator.setNewState(AbstractCoordinator.MemberState.REBALANCING);
+        coordinator.setNewState(AbstractCoordinator.MemberState.PREPARING_REBALANCE);
         RequestFuture<ByteBuffer> future = coordinator.sendJoinGroupRequest();
 
         TestUtils.waitForCondition(() -> {
@@ -571,7 +592,7 @@ public class AbstractCoordinatorTest {
 
         final AbstractCoordinator.Generation currGen = coordinator.generation();
 
-        coordinator.setNewState(AbstractCoordinator.MemberState.REBALANCING);
+        coordinator.setNewState(AbstractCoordinator.MemberState.PREPARING_REBALANCE);
         RequestFuture<ByteBuffer> future = coordinator.sendJoinGroupRequest();
 
         TestUtils.waitForCondition(() -> {
@@ -602,6 +623,25 @@ public class AbstractCoordinatorTest {
 
         // the generation should not be reset
         assertEquals(newGen, coordinator.generation());
+    }
+
+    @Test
+    public void testHeartbeatSentWhenCompletingRebalance() throws Exception {
+        setupCoordinator();
+        joinGroup();
+
+        final AbstractCoordinator.Generation currGen = coordinator.generation();
+
+        coordinator.setNewState(AbstractCoordinator.MemberState.COMPLETING_REBALANCE);
+
+        // the heartbeat should be sent out during a rebalance
+        mockTime.sleep(HEARTBEAT_INTERVAL_MS);
+        TestUtils.waitForCondition(() -> !mockClient.requests().isEmpty(), 2000,
+                "The heartbeat request was not sent");
+        assertTrue(coordinator.heartbeat().hasInflight());
+
+        mockClient.respond(heartbeatResponse(Errors.REBALANCE_IN_PROGRESS));
+        assertEquals(currGen, coordinator.generation());
     }
 
     @Test
@@ -673,7 +713,7 @@ public class AbstractCoordinatorTest {
     }
 
     @Test
-    public void testHeartbeatUnknownMemberResponseDuringRebalancing() throws InterruptedException {
+    public void testHeartbeatRebalanceInProgressResponseDuringRebalancing() throws InterruptedException {
         setupCoordinator();
         joinGroup();
 
@@ -687,8 +727,7 @@ public class AbstractCoordinatorTest {
 
         assertTrue(coordinator.heartbeat().hasInflight());
 
-        // set the client to re-join group
-        mockClient.respond(heartbeatResponse(Errors.UNKNOWN_MEMBER_ID));
+        mockClient.respond(heartbeatResponse(Errors.REBALANCE_IN_PROGRESS));
 
         coordinator.requestRejoin();
 
@@ -699,8 +738,8 @@ public class AbstractCoordinatorTest {
             2000,
             "The heartbeat response was not received");
 
-        // the generation should be reset but the rebalance should still proceed
-        assertEquals(AbstractCoordinator.Generation.NO_GENERATION, coordinator.generation());
+        // the generation would not be reset while the rebalance is in progress
+        assertEquals(currGen, coordinator.generation());
 
         mockClient.respond(joinGroupFollowerResponse(currGen.generationId, memberId, JoinGroupRequest.UNKNOWN_MEMBER_ID, Errors.NONE));
         mockClient.prepareResponse(syncGroupResponse(Errors.NONE));
@@ -782,6 +821,35 @@ public class AbstractCoordinatorTest {
         assertEquals(Errors.UNKNOWN_MEMBER_ID.message(), future.exception().getMessage());
         assertTrue(coordinator.rejoinNeededOrPending());
         assertTrue(coordinator.hasUnknownGeneration());
+    }
+
+    @Test
+    public void testJoinGroupRequestWithRebalanceInProgress() {
+        setupCoordinator();
+        mockClient.prepareResponse(groupCoordinatorResponse(node, Errors.NONE));
+        coordinator.ensureCoordinatorReady(mockTime.timer(0));
+
+        mockClient.prepareResponse(
+            joinGroupFollowerResponse(defaultGeneration, memberId, JoinGroupRequest.UNKNOWN_MEMBER_ID, Errors.REBALANCE_IN_PROGRESS));
+
+        RequestFuture<ByteBuffer> future = coordinator.sendJoinGroupRequest();
+
+        assertTrue(consumerClient.poll(future, mockTime.timer(REQUEST_TIMEOUT_MS)));
+        assertTrue(future.exception().getClass().isInstance(Errors.REBALANCE_IN_PROGRESS.exception()));
+        assertEquals(Errors.REBALANCE_IN_PROGRESS.message(), future.exception().getMessage());
+        assertTrue(coordinator.rejoinNeededOrPending());
+
+        // make sure we'll retry on next poll
+        assertEquals(0, coordinator.onJoinPrepareInvokes);
+        assertEquals(0, coordinator.onJoinCompleteInvokes);
+
+        mockClient.prepareResponse(joinGroupFollowerResponse(defaultGeneration, memberId, JoinGroupRequest.UNKNOWN_MEMBER_ID, Errors.NONE));
+        mockClient.prepareResponse(syncGroupResponse(Errors.NONE));
+
+        coordinator.ensureActiveGroup();
+        // make sure both onJoinPrepare and onJoinComplete got called
+        assertEquals(1, coordinator.onJoinPrepareInvokes);
+        assertEquals(1, coordinator.onJoinCompleteInvokes);
     }
 
     @Test
@@ -938,7 +1006,7 @@ public class AbstractCoordinatorTest {
     public void testLookupCoordinator() {
         setupCoordinator();
 
-        mockClient.blackout(node, 50);
+        mockClient.backoff(node, 50);
         RequestFuture<Void> noBrokersAvailableFuture = coordinator.lookupCoordinator();
         assertTrue("Failed future expected", noBrokersAvailableFuture.failed());
         mockTime.sleep(50);
@@ -1099,44 +1167,6 @@ public class AbstractCoordinatorTest {
     }
 
     @Test
-    public void testWakeupAfterSyncGroupSent() throws Exception {
-        setupCoordinator();
-
-        mockClient.prepareResponse(groupCoordinatorResponse(node, Errors.NONE));
-        mockClient.prepareResponse(joinGroupFollowerResponse(1, memberId, leaderId, Errors.NONE));
-        mockClient.prepareResponse(new MockClient.RequestMatcher() {
-            private int invocations = 0;
-            @Override
-            public boolean matches(AbstractRequest body) {
-                invocations++;
-                boolean isSyncGroupRequest = body instanceof SyncGroupRequest;
-                if (isSyncGroupRequest && invocations == 1)
-                    // simulate wakeup after the request sent
-                    throw new WakeupException();
-                return isSyncGroupRequest;
-            }
-        }, syncGroupResponse(Errors.NONE));
-        AtomicBoolean heartbeatReceived = prepareFirstHeartbeat();
-
-        try {
-            coordinator.ensureActiveGroup();
-            fail("Should have woken up from ensureActiveGroup()");
-        } catch (WakeupException ignored) {
-        }
-
-        assertEquals(1, coordinator.onJoinPrepareInvokes);
-        assertEquals(0, coordinator.onJoinCompleteInvokes);
-        assertFalse(heartbeatReceived.get());
-
-        coordinator.ensureActiveGroup();
-
-        assertEquals(1, coordinator.onJoinPrepareInvokes);
-        assertEquals(1, coordinator.onJoinCompleteInvokes);
-
-        awaitFirstHeartbeat(heartbeatReceived);
-    }
-
-    @Test
     public void testWakeupAfterSyncGroupSentExternalCompletion() throws Exception {
         setupCoordinator();
 
@@ -1149,8 +1179,8 @@ public class AbstractCoordinatorTest {
                 invocations++;
                 boolean isSyncGroupRequest = body instanceof SyncGroupRequest;
                 if (isSyncGroupRequest && invocations == 1)
-                    // simulate wakeup after the request sent
-                    throw new WakeupException();
+                    // wakeup after the request returns
+                    consumerClient.wakeup();
                 return isSyncGroupRequest;
             }
         }, syncGroupResponse(Errors.NONE));
